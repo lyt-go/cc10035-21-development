@@ -94,5 +94,15 @@ def create_entry(module: str, payload: EntryPayload) -> ActionResult:
 @router.post("/{module}/{entry_id}/actions", response_model=ActionResult)
 def run_action(module: str, entry_id: int, payload: ActionPayload) -> ActionResult:
     service = require_service(module)
-    entry, message = service.run_action(entry_id, payload.action.strip())
+    runner = service.run_action
+    # 向后兼容只声明 (entry_id, action) 的领域服务；新关窗流程需要动作附带参数。
+    try:
+        import inspect
+
+        if len(inspect.signature(runner).parameters) >= 3:
+            entry, message = runner(entry_id, payload.action.strip(), payload.values)
+        else:
+            entry, message = runner(entry_id, payload.action.strip())
+    except TypeError:
+        entry, message = runner(entry_id, payload.action.strip())
     return ActionResult(ok=entry is not None, message=message, entry=entry)

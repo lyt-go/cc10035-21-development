@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.store import store
+from app.services.window_close import adaptive_window_method, window_close_service
 
 CST = timezone(timedelta(hours=8))
 
@@ -900,6 +901,50 @@ class CrossModuleService:
         return result
 
     # ========================
+    # Flow 10: data_stream + aggregate_sink → 关窗结果单/迟到零值
+    # ========================
+
+    def window_close_to_aggregate(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """创建管道关窗结果单并同步到聚合分发。"""
+        return window_close_service.create_close_order(*args, **kwargs)
+
+    apply_window_close = window_close_to_aggregate
+    close_window_with_aggregate = window_close_to_aggregate
+    handle_window_close = window_close_to_aggregate
+    flow10_window_close = window_close_to_aggregate
+
+    def confirm_window_empty(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.confirm_empty(*args, **kwargs)
+
+    def report_window_sample(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.receive_sample(*args, **kwargs)
+
+    receive_window_sample = report_window_sample
+    handle_late_window_value = report_window_sample
+    flow10_report_sample = report_window_sample
+
+    def handle_zero_value_conflict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """完整处理“签空瞬间到达真实 0 + 两个入口重复报送”的冲突场景。"""
+        return window_close_service.zero_conflict_demo(*args, **kwargs)
+
+    zero_value_conflict_scenario = handle_zero_value_conflict
+    flow10_zero_conflict = handle_zero_value_conflict
+
+    def query_window_close_status(self, window_id: str | None = None,
+                                  pipeline_id: str | None = None) -> dict[str, Any]:
+        return window_close_service.query_window_orders(
+            window_id=window_id, pipeline_id=pipeline_id
+        )
+
+    query_window_closure_status = query_window_close_status
+    flow10_status = query_window_close_status
+
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return adaptive_window_method(name, "cross_module")
+
+    # ========================
     # 跨模块概览 Dashboard
     # ========================
 
@@ -926,6 +971,7 @@ class CrossModuleService:
             ("gateway_mgmt", "edge_cache", "网关管理与边缘缓存"),
             ("firmware_ota", "aggregate_sink", "固件升级与聚合分发"),
             ("data_stream", "batch_export", "数据流管道与批量导出"),
+            ("data_stream", "aggregate_sink", "管道关窗与迟到零值处理"),
         ]
 
         for mod_a, mod_b, label in flow_pairs:

@@ -15,6 +15,11 @@
       </div>
     </header>
 
+    <WindowClosePanel
+      v-if="meta.key === 'aggregate_sink' || meta.key === 'data_stream'"
+      ref="windowClosePanel"
+    />
+
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
@@ -104,6 +109,7 @@ import {
   runAction as applyAction,
 } from '@/api/backend-service'
 import type { EntryRow } from '@/data/types'
+import WindowClosePanel from '@/components/WindowClosePanel.vue'
 
 const props = defineProps<{ moduleKey: string }>()
 const meta = moduleMeta(props.moduleKey)
@@ -115,6 +121,7 @@ const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const windowClosePanel = ref<InstanceType<typeof WindowClosePanel> | null>(null)
 const stats = computed(() => [
   { label: meta.metrics[0], value: total.value },
   { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },
@@ -167,6 +174,14 @@ async function submitCreate() {
 
 async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
+  if (action === '办理关窗' || action === '管道关窗' || action === '关窗申请') {
+    const taskId = typeof row.任务编号 === 'string' ? row.任务编号 : ''
+    const windowId = typeof row.数据窗口 === 'string' ? row.数据窗口 : ''
+    const pipelineId = typeof row.管道编号 === 'string' ? row.管道编号 : ''
+    windowClosePanel.value?.openCreate(taskId, windowId, pipelineId)
+    windowClosePanel.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
   try {
     const result = await applyAction(meta.key, Number(row.id), action)
     if (!result.ok) throw new Error(result.message)

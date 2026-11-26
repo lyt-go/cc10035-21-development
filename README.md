@@ -69,6 +69,29 @@ npm run dev
 | 数据流管道 | `data_stream` | 流管道 | 管道编号、输入源、处理算子链 |
 | 聚合分发 | `aggregate_sink` | 分发任务 | 任务编号、数据窗口、聚合函数 |
 
+## 管道关窗与迟到零值
+
+聚合分发工作台（以及数据流管道页）提供「管道关窗结果单」，也可直接访问 `/window-close`。
+
+- 管道未收齐时，服务端保持窗口为「待关闭」，不能签成空窗。
+- 收齐且无样本时可正式签收为「已确认空窗」；聚合值保持为空，不写入占位 `0`，历史签收单仍可查询。
+- 真实上报的 `0` 是合法读数，聚合结果为数值 `0`；同一 `sample_id` 或同窗口/位置/时间/读数的重投只计一次。
+- 迟到样本按数据时间匹配实际窗口；即使调用时带了相邻窗口编号，也会改归实际所属窗口，其他已确认窗口不变。
+- 已签空后收到迟到值会保留第一次签收和随后更正两份状态，并可按更正后的状态安排下一笔补交。
+
+核心接口：
+
+```text
+GET  /api/window-close-orders
+POST /api/window-close-orders
+POST /api/window-close-orders/{id}/confirm-empty
+POST /api/window-close-orders/{id}/samples
+POST /api/window-close-orders/{id}/correct
+POST /api/window-close-orders/{id}/supplement
+POST /api/window-close/scenario
+POST /api/window-close/demo
+```
+
 ## 约定
 
 - 全部模块共享`frontend/src/views/WorkbenchView.vue|tsx`和一套资源路由。

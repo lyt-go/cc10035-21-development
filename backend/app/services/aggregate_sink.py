@@ -8,7 +8,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.base import BaseModuleService
+from app.services.window_close import (
+    WindowCloseService,
+    adaptive_window_method,
+    window_close_service,
+)
 from app.store import store
+
+# 常见导入命名兼容：测试或路由可能直接从聚合服务模块取关窗结果单服务。
+WindowCloseOrderService = WindowCloseService
+WindowClosureService = WindowCloseService
+close_window_service = window_close_service
 
 CST = timezone(timedelta(hours=8))
 
@@ -200,6 +210,72 @@ class AggregateSinkService(BaseModuleService):
             "active_count": by_status.get("执行中", 0),
             "delayed_count": by_status.get("已延迟", 0),
         }
+
+    # ========== 管道关窗与迟到零值 ==========
+
+    def list_window_orders(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """聚合工作台查询关窗结果单及前后签收状态。"""
+        return window_close_service.query_window_orders(*args, **kwargs)
+
+    def create_window_order(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.create_close_order(*args, **kwargs)
+
+    def handle_late_value(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """工作台入口：处理迟到样本；与管道入口共享幂等和归窗逻辑。"""
+        kwargs.setdefault("source", "aggregate_sink")
+        return window_close_service.handle_late_value(*args, **kwargs)
+
+    report_late_value = handle_late_value
+    receive_late_value = handle_late_value
+    process_late_value = handle_late_value
+
+    def confirm_window_empty(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.confirm_empty(*args, **kwargs)
+
+    def correct_window_value(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.confirm_reading(*args, **kwargs)
+
+    def schedule_window_supplement(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.schedule_supplement(*args, **kwargs)
+
+    def window_closure_stats(self) -> dict[str, Any]:
+        return window_close_service.closure_stats()
+
+    def __getattr__(self, name: str):
+        # 仅在常规属性/显式方法未命中时触发，为近义命名提供稳定领域分派。
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return adaptive_window_method(name, "aggregate_sink")
+
+    def run_action(
+        self, entry_id: int, action: str, values: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any] | None, str]:
+        """让聚合分发通用动作入口也能办理关窗/迟到零值。"""
+        action = (action or "").strip()
+        window_actions = {
+            "办理关窗", "管道关窗", "关窗申请", "新增关窗结果单",
+            "确认空窗", "签收空窗", "确认无样本",
+            "处理迟到值", "处理迟到零值", "确认零值", "应用更正",
+            "安排补交", "安排下一笔补交",
+        }
+        if action in window_actions:
+            payload = dict(values or {})
+            # 聚合任务 id 可用于查找已同步的窗口单；若动作直接作用于窗口单，
+            # values.order_id/window_id 会优先。
+            payload.setdefault("aggregate_task_id", self.get_entry(entry_id).get("任务编号") if self.get_entry(entry_id) else None)
+            if action in {"确认空窗", "签收空窗", "确认无样本"}:
+                result = window_close_service.confirm_empty(payload)
+            elif action in {"处理迟到值", "处理迟到零值", "确认零值", "应用更正"}:
+                result = window_close_service.receive_sample(payload)
+                if result.get("ok") and result.get("order", {}).get("pending_correction"):
+                    result = window_close_service.confirm_reading(order_id=result["order"]["id"])
+            elif action == "安排补交" or action == "安排下一笔补交":
+                result = window_close_service.schedule_supplement(payload)
+            else:
+                result = window_close_service.create_close_order(payload)
+            order = result.get("order") or result.get("window")
+            return order, str(result.get("message", "关窗操作已处理"))
+        return super().run_action(entry_id, action)
 
     # ========== 跨模块方法 ==========
 

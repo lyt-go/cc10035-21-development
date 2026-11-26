@@ -8,7 +8,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.base import BaseModuleService
+from app.services.window_close import (
+    WindowCloseService,
+    adaptive_window_method,
+    window_close_service,
+)
 from app.store import store
+
+WindowCloseOrderService = WindowCloseService
+WindowClosureService = WindowCloseService
 
 CST = timezone(timedelta(hours=8))
 
@@ -200,6 +208,40 @@ class DataStreamService(BaseModuleService):
                 for r in rows
             ],
         }
+
+    # ========== 管道关窗与样本接收 ==========
+
+    def apply_window_close(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """管道发起关窗申请；资格由服务端按实际接收状态判定。"""
+        return window_close_service.apply_window_close(*args, **kwargs)
+
+    submit_window_close = apply_window_close
+    request_window_close = apply_window_close
+    create_close_order = apply_window_close
+
+    def receive_sample(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """管道实际收到样本的统一入口，迟到样本按时间归窗并幂等去重。"""
+        kwargs.setdefault("source", "data_stream")
+        return window_close_service.receive_sample(*args, **kwargs)
+
+    ingest_sample = receive_sample
+    report_sample = receive_sample
+    receive_reading = receive_sample
+    report_reading = receive_sample
+
+    def sync_pipeline_receipt(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.sync_pipeline_receipt(*args, **kwargs)
+
+    def confirm_window_empty(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.confirm_empty(*args, **kwargs)
+
+    def query_window_close_orders(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return window_close_service.query_window_orders(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return adaptive_window_method(name, "data_stream")
 
     # ========== 跨模块方法 ==========
 
